@@ -60,7 +60,10 @@ function App() {
         />
         
         {/* Protected Routes */}
-        <Route path="/" element={currentUser ? <Layout currentUser={currentUser} /> : <Navigate to="/auth" replace />}>
+        <Route
+          path="/"
+          element={currentUser ? <Layout currentUser={currentUser} onLogout={() => setCurrentUser(null)} /> : <Navigate to="/auth" replace />}
+        >
           <Route index element={<Dashboard />} />
           <Route path="simulate" element={<SimulateFlow />} />
           <Route path="messages" element={<Messages />} />

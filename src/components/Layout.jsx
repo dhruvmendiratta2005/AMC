@@ -2,13 +2,14 @@ import { Outlet, Link, useNavigate } from 'react-router-dom';
 import { Activity, MessageSquare, LogOut, Radio, Mail, Shield } from 'lucide-react';
 import { clearSessionUser, isAdminUser } from '../utils/session';
 
-export default function Layout({ currentUser }) {
+export default function Layout({ currentUser, onLogout }) {
   const navigate = useNavigate();
   const canAccessAdmin = isAdminUser(currentUser);
 
   const handleLogout = () => {
     clearSessionUser();
-    navigate('/auth');
+    onLogout?.();
+    navigate('/auth', { replace: true });
   };
 
   return (
