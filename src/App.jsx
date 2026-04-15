@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard';
 import SimulateFlow from './pages/SimulateFlow';
 import Messages from './pages/Messages';
 import MSCDashboard from './pages/MSCDashboard';
+import Calls from './pages/Calls';
 import { supabase } from './supabaseClient';
 import { getStoredUserId, clearSessionUser, isAdminUser } from './utils/session';
 
@@ -67,6 +68,7 @@ function App() {
           <Route index element={<Dashboard />} />
           <Route path="simulate" element={<SimulateFlow />} />
           <Route path="messages" element={<Messages />} />
+          <Route path="calls" element={<Calls />} />
           <Route
             path="msc-dashboard"
             element={isAdminUser(currentUser) ? <MSCDashboard /> : <Navigate to="/" replace />}

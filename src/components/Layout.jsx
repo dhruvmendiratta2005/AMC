@@ -1,5 +1,5 @@
 import { Outlet, Link, useNavigate } from 'react-router-dom';
-import { Activity, MessageSquare, LogOut, Radio, Mail, Shield } from 'lucide-react';
+import { Activity, MessageSquare, LogOut, Radio, Mail, Shield, PhoneCall } from 'lucide-react';
 import { clearSessionUser, isAdminUser } from '../utils/session';
 
 export default function Layout({ currentUser, onLogout }) {
@@ -34,6 +34,9 @@ export default function Layout({ currentUser, onLogout }) {
           </Link>
           <Link to="/messages" className="flex items-center gap-3 p-3 rounded-lg hover:bg-neutral-800 transition-colors">
             <Mail size={20} /> Inbox & Outbox
+          </Link>
+          <Link to="/calls" className="flex items-center gap-3 p-3 rounded-lg hover:bg-neutral-800 transition-colors">
+            <PhoneCall size={20} /> Voice Calls
           </Link>
           <Link to="/simulate" className="flex items-center gap-3 p-3 rounded-lg hover:bg-neutral-800 transition-colors">
             <MessageSquare size={20} /> Simulate Route
