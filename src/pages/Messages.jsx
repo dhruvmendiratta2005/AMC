@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
-import { Mail, ArrowRight, User, CheckCircle2, Clock } from 'lucide-react';
+import { Mail, ArrowRight, User, CheckCircle2, Clock, AlertTriangle } from 'lucide-react';
 
 export default function Messages() {
   const [messages, setMessages] = useState([]);
@@ -8,13 +8,14 @@ export default function Messages() {
 
   const fetchMessages = async () => {
     try {
-      const [{ data: msgs }, { data: allUsers }] = await Promise.all([
+      const [{ data: msgs }, { data: allUsers }, { data: alerts }] = await Promise.all([
         supabase
           .from('messages')
           .select('*')
           .or(`sender_id.eq.${currentUserId},receiver_id.eq.${currentUserId}`)
           .order('timestamp', { ascending: false }),
-        supabase.from('users').select('id, username, phone_number')
+        supabase.from('users').select('id, username, phone_number'),
+        supabase.from('alerts').select('*').order('timestamp', { ascending: false })
       ]);
 
       if (msgs && allUsers) {
@@ -23,12 +24,27 @@ export default function Messages() {
            return acc;
         }, {});
         
-        const formatted = msgs.map(msg => ({
+        const formattedMessages = msgs.map(msg => ({
           ...msg,
+          itemType: 'message',
           sender: userMap[msg.sender_id] || 'Unknown',
           receiver: userMap[msg.receiver_id] || 'Unknown'
         }));
-        setMessages(formatted);
+
+        const formattedAlerts = (alerts || []).map((alert) => ({
+          ...alert,
+          itemType: 'alert',
+          sender: 'MSC Emergency Broadcast',
+          receiver: 'All Registered Nodes',
+          content: alert.message,
+          status: `${alert.priority} Priority`,
+        }));
+
+        const timeline = [...formattedAlerts, ...formattedMessages].sort(
+          (a, b) => new Date(b.timestamp) - new Date(a.timestamp)
+        );
+
+        setMessages(timeline);
       }
     } catch (err) {
       console.error(err);
@@ -52,30 +68,51 @@ export default function Messages() {
           <div className="text-center text-neutral-500 py-12">No messages to display.</div>
         ) : (
           messages.map(msg => {
+             const isAlert = msg.itemType === 'alert';
              const delivered = msg.status === 'Delivered';
 
              return (
-               <div key={msg.id} className="bg-neutral-950 border border-neutral-800 p-5 rounded-lg flex flex-col gap-3">
-                 <div className="flex justify-between items-center border-b border-neutral-800 pb-3">
+               <div
+                 key={`${msg.itemType}-${msg.id}`}
+                 className={`p-5 rounded-lg flex flex-col gap-3 border ${
+                   isAlert
+                     ? 'bg-red-950/30 border-red-900/50'
+                     : 'bg-neutral-950 border-neutral-800'
+                 }`}
+               >
+                 <div className={`flex justify-between items-center pb-3 border-b ${isAlert ? 'border-red-900/50' : 'border-neutral-800'}`}>
                    <div className="flex items-center gap-3 text-sm font-medium">
-                     <span className="text-blue-400 flex items-center gap-1"><User size={16}/> {msg.sender}</span>
-                     <ArrowRight size={16} className="text-neutral-500" />
-                     <span className="text-green-400 flex items-center gap-1"><User size={16}/> {msg.receiver}</span>
+                     <span className={`flex items-center gap-1 ${isAlert ? 'text-red-300' : 'text-blue-400'}`}>
+                       {isAlert ? <AlertTriangle size={16} /> : <User size={16} />}
+                       {msg.sender}
+                     </span>
+                     <ArrowRight size={16} className={isAlert ? 'text-red-700' : 'text-neutral-500'} />
+                     <span className={`flex items-center gap-1 ${isAlert ? 'text-red-200' : 'text-green-400'}`}>
+                       {isAlert ? <AlertTriangle size={16} /> : <User size={16} />}
+                       {msg.receiver}
+                     </span>
                    </div>
-                   <div className="text-xs text-neutral-500">
+                   <div className={`text-xs ${isAlert ? 'text-red-200/70' : 'text-neutral-500'}`}>
                      {new Date(msg.timestamp).toLocaleString()}
                    </div>
                  </div>
                  
-                 <div className="text-neutral-200">
+                 <div className={isAlert ? 'text-red-50 font-medium' : 'text-neutral-200'}>
                    {msg.content}
                  </div>
                  
                  <div className="flex justify-end pt-2">
-                    <span className={`text-xs px-2 py-1 rounded-full flex items-center gap-1 ${delivered ? 'bg-green-500/20 text-green-400' : 'bg-orange-500/20 text-orange-400'}`}>
-                      {delivered ? <CheckCircle2 size={14}/> : <Clock size={14}/>}
-                      {msg.status}
-                    </span>
+                    {isAlert ? (
+                      <span className="text-xs px-2 py-1 rounded-full flex items-center gap-1 bg-red-500/20 text-red-300 border border-red-500/20">
+                        <AlertTriangle size={14} />
+                        {msg.status}
+                      </span>
+                    ) : (
+                      <span className={`text-xs px-2 py-1 rounded-full flex items-center gap-1 ${delivered ? 'bg-green-500/20 text-green-400' : 'bg-orange-500/20 text-orange-400'}`}>
+                        {delivered ? <CheckCircle2 size={14}/> : <Clock size={14}/>}
+                        {msg.status}
+                      </span>
+                    )}
                  </div>
                </div>
              )
