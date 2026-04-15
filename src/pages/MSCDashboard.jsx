@@ -1,17 +1,12 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
-import { Activity, RadioTower, ServerCog, UsersRound } from 'lucide-react';
+import { Activity, RadioTower, ServerCog, UsersRound, ShieldAlert, Sparkles } from 'lucide-react';
+import { BTS_TOWERS, describeUserWithTower, getTowerForUser } from '../utils/network';
+import { FAULT_PROFILES, getStoredFaultProfile, setStoredFaultProfile } from '../utils/faultInjection';
 
 const ACTIVE_WINDOW_MS = 5 * 60 * 1000;
 const TRAFFIC_WINDOW_MS = 30 * 60 * 1000;
-const BTS_TOWERS = ['BTS North', 'BTS East', 'BTS South', 'BTS West'];
 const QUEUE_STATUSES = ['Sent', 'BTS_Processing', 'MSC_Routing', 'Target_BTS'];
-
-function getTowerForUser(user) {
-  const numericSeed = Number.parseInt(`${user?.phone_number || user?.id || 0}`.replace(/\D/g, '').slice(-2), 10);
-  const safeSeed = Number.isNaN(numericSeed) ? Number(user?.id || 0) : numericSeed;
-  return BTS_TOWERS[safeSeed % BTS_TOWERS.length];
-}
 
 function formatRelativeWindow(minutes) {
   return `Last ${minutes} min`;
@@ -116,17 +111,32 @@ function RingChart({ activeCount, totalCount }) {
 
 export default function MSCDashboard() {
   const [isLoading, setIsLoading] = useState(true);
+  const [faultProfile, setFaultProfile] = useState(() => getStoredFaultProfile());
   const [snapshot, setSnapshot] = useState({
     totalUsers: 0,
     activeUsers: 0,
     queueDepth: 0,
     queueBreakdown: QUEUE_STATUSES.map((status) => ({ label: status.replaceAll('_', ' '), value: 0 })),
     trafficByTower: BTS_TOWERS.map((tower) => ({
-      label: tower,
+      label: tower.name,
       value: 0,
       description: 'No recent routed traffic',
     })),
+    usersByTower: BTS_TOWERS.map((tower) => ({
+      label: tower.name,
+      members: [],
+    })),
   });
+
+  useEffect(() => {
+    const syncFaultProfile = () => setFaultProfile(getStoredFaultProfile());
+    window.addEventListener('gsm:fault-change', syncFaultProfile);
+    window.addEventListener('storage', syncFaultProfile);
+    return () => {
+      window.removeEventListener('gsm:fault-change', syncFaultProfile);
+      window.removeEventListener('storage', syncFaultProfile);
+    };
+  }, []);
 
   useEffect(() => {
     const fetchSnapshot = async () => {
@@ -143,10 +153,7 @@ export default function MSCDashboard() {
           supabase.from('users').select('id, username, phone_number'),
           supabase.from('messages').select('sender_id, receiver_id, timestamp').gte('timestamp', activityThreshold),
           supabase.from('messages').select('id, status').neq('status', 'Delivered'),
-          supabase
-            .from('messages')
-            .select('sender_id, receiver_id, timestamp')
-            .gte('timestamp', trafficThreshold),
+          supabase.from('messages').select('sender_id, receiver_id, timestamp').gte('timestamp', trafficThreshold),
         ]);
 
         const allUsers = usersData || [];
@@ -170,33 +177,45 @@ export default function MSCDashboard() {
 
         const userMap = new Map(allUsers.map((user) => [user.id, user]));
         const trafficCounts = BTS_TOWERS.reduce((accumulator, tower) => {
-          accumulator[tower] = 0;
+          accumulator[tower.name] = 0;
           return accumulator;
         }, {});
+        const towerMembership = BTS_TOWERS.reduce((accumulator, tower) => {
+          accumulator[tower.name] = [];
+          return accumulator;
+        }, {});
+
+        allUsers.forEach((user) => {
+          const mapped = describeUserWithTower(user);
+          towerMembership[mapped.tower.name].push(mapped.label);
+        });
 
         (recentTrafficMessages || []).forEach((message) => {
           const senderTower = getTowerForUser(userMap.get(message.sender_id));
           const receiverTower = getTowerForUser(userMap.get(message.receiver_id));
-
-          trafficCounts[senderTower] += 1;
-          trafficCounts[receiverTower] += 1;
+          trafficCounts[senderTower.name] += 1;
+          trafficCounts[receiverTower.name] += 1;
         });
 
         setSnapshot({
           totalUsers: allUsers.length,
           activeUsers: activeUserIds.size,
-          queueDepth: (queuedMessages || []).length,
+          queueDepth: (queuedMessages || []).length + (faultProfile.queuePressure || 0),
           queueBreakdown: QUEUE_STATUSES.map((status) => ({
             label: status.replaceAll('_', ' '),
-            value: queueCounts[status],
+            value: status === 'MSC_Routing' ? queueCounts[status] + (faultProfile.queuePressure || 0) : queueCounts[status],
           })),
           trafficByTower: BTS_TOWERS.map((tower) => ({
-            label: tower,
-            value: trafficCounts[tower],
+            label: tower.name,
+            value: trafficCounts[tower.name],
             description:
-              trafficCounts[tower] > 0
-                ? `${trafficCounts[tower]} message handoffs in ${formatRelativeWindow(TRAFFIC_WINDOW_MS / 60000)}`
+              trafficCounts[tower.name] > 0
+                ? `${trafficCounts[tower.name]} message handoffs in ${formatRelativeWindow(TRAFFIC_WINDOW_MS / 60000)}`
                 : `No message handoffs in ${formatRelativeWindow(TRAFFIC_WINDOW_MS / 60000)}`,
+          })),
+          usersByTower: BTS_TOWERS.map((tower) => ({
+            label: tower.name,
+            members: towerMembership[tower.name],
           })),
         });
       } catch (error) {
@@ -209,7 +228,7 @@ export default function MSCDashboard() {
     fetchSnapshot();
     const interval = setInterval(fetchSnapshot, 3000);
     return () => clearInterval(interval);
-  }, []);
+  }, [faultProfile]);
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-8 p-8">
@@ -225,6 +244,46 @@ export default function MSCDashboard() {
           Refresh cadence: every 3 seconds
         </div>
       </div>
+
+      <section className={`rounded-3xl border p-6 ${faultProfile.panelClass}`}>
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="max-w-2xl">
+            <div className="flex items-center gap-2 text-sm uppercase tracking-[0.3em] text-neutral-200">
+              <ShieldAlert size={16} />
+              Fault Injection Mode
+            </div>
+            <h2 className="mt-3 text-2xl font-semibold text-neutral-100">{faultProfile.label}</h2>
+            <p className="mt-2 text-sm text-neutral-300">{faultProfile.description}</p>
+          </div>
+          <div className="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-white/80">
+            Active Profile: {faultProfile.badge}
+          </div>
+        </div>
+
+        <div className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {FAULT_PROFILES.map((profile) => {
+            const isActive = profile.id === faultProfile.id;
+            return (
+              <button
+                key={profile.id}
+                type="button"
+                onClick={() => setStoredFaultProfile(profile.id)}
+                className={`rounded-2xl border p-4 text-left transition-colors ${
+                  isActive
+                    ? 'border-white/20 bg-white/10'
+                    : 'border-white/10 bg-black/10 hover:bg-white/5'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="font-medium text-neutral-100">{profile.label}</div>
+                  {isActive && <Sparkles size={16} className="text-white" />}
+                </div>
+                <div className="mt-2 text-sm text-neutral-300">{profile.description}</div>
+              </button>
+            );
+          })}
+        </div>
+      </section>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         <StatCard
@@ -258,7 +317,7 @@ export default function MSCDashboard() {
             </div>
             <div>
               <h2 className="text-xl font-semibold text-neutral-100">Total Active Users Right Now</h2>
-              <p className="text-sm text-neutral-500">Derived from send/receive activity in the last 5 minutes.</p>
+              <p className="text-sm text-neutral-500">Derived from send and receive activity in the last 5 minutes.</p>
             </div>
           </div>
           <div className="flex min-h-[320px] items-center justify-center">
@@ -287,12 +346,35 @@ export default function MSCDashboard() {
           </div>
           <div>
             <h2 className="text-xl font-semibold text-neutral-100">Traffic Distribution Between BTS Towers</h2>
-            <p className="text-sm text-neutral-500">
-              Towers are assigned deterministically from the simulated node identities so the current schema can still show balanced traffic.
-            </p>
+            <p className="text-sm text-neutral-500">The dashboard now uses stable tower assignments shared with the live simulator.</p>
           </div>
         </div>
         <TrafficBars items={snapshot.trafficByTower} />
+      </section>
+
+      <section className="rounded-3xl border border-neutral-800 bg-neutral-900 p-6">
+        <div className="mb-6 flex items-center gap-3">
+          <div className="rounded-2xl border border-violet-500/20 bg-violet-500/10 p-3 text-violet-300">
+            <UsersRound size={22} />
+          </div>
+          <div>
+            <h2 className="text-xl font-semibold text-neutral-100">Real BTS Tower Assignments</h2>
+            <p className="text-sm text-neutral-500">Each subscriber is pinned to a stable simulated BTS tower based on node identity.</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {snapshot.usersByTower.map((tower) => (
+            <div key={tower.label} className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="font-medium text-neutral-100">{tower.label}</div>
+                <div className="text-xs uppercase tracking-[0.25em] text-neutral-500">{tower.members.length} nodes</div>
+              </div>
+              <div className="mt-4 space-y-2 text-sm text-neutral-300">
+                {tower.members.length > 0 ? tower.members.map((member) => <div key={member}>{member}</div>) : <div className="text-neutral-500">No assigned nodes</div>}
+              </div>
+            </div>
+          ))}
+        </div>
       </section>
 
       {isLoading && <div className="text-sm text-neutral-500">Loading live MSC metrics...</div>}
