@@ -1,12 +1,14 @@
 import { Outlet, Link, useNavigate } from 'react-router-dom';
-import { Activity, MessageSquare, LogOut, Radio, Mail } from 'lucide-react';
+import { Activity, MessageSquare, LogOut, Radio, Mail, Shield } from 'lucide-react';
+import { clearSessionUser, isAdminUser } from '../utils/session';
 
-export default function Layout() {
+export default function Layout({ currentUser }) {
   const navigate = useNavigate();
+  const canAccessAdmin = isAdminUser(currentUser);
 
   const handleLogout = () => {
-    localStorage.removeItem("gsmUserId");
-    navigate("/auth");
+    clearSessionUser();
+    navigate('/auth');
   };
 
   return (
@@ -16,6 +18,13 @@ export default function Layout() {
         <div className="flex items-center gap-3 font-semibold text-xl mb-8 text-blue-500">
           <Radio size={28} />
           GSM System
+        </div>
+
+        <div className="mb-6 rounded-xl border border-neutral-800 bg-neutral-950 p-3">
+          <div className="text-sm font-medium text-neutral-100">{currentUser?.username || 'Unknown User'}</div>
+          <div className="text-xs text-neutral-500">
+            {canAccessAdmin ? 'MSC administrator access enabled' : 'Standard node access'}
+          </div>
         </div>
         
         <div className="flex flex-col gap-2 flex-grow">
@@ -28,6 +37,11 @@ export default function Layout() {
           <Link to="/simulate" className="flex items-center gap-3 p-3 rounded-lg hover:bg-neutral-800 transition-colors">
             <MessageSquare size={20} /> Simulate Route
           </Link>
+          {canAccessAdmin && (
+            <Link to="/msc-dashboard" className="flex items-center gap-3 p-3 rounded-lg hover:bg-neutral-800 transition-colors">
+              <Shield size={20} /> MSC Dashboard
+            </Link>
+          )}
         </div>
 
         <button 

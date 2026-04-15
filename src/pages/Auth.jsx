@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { Radio } from 'lucide-react';
+import { storeSessionUser } from '../utils/session';
 
-export default function Auth() {
+export default function Auth({ onAuthSuccess }) {
   const [isLogin, setIsLogin] = useState(true);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -27,8 +28,9 @@ export default function Auth() {
         if (selectError || !data) {
            setError('Invalid phone number or password');
         } else {
-           localStorage.setItem('gsmUserId', data.id);
-           window.location.href = '/'; // hard reload to trigger App.jsx logic
+           storeSessionUser(data);
+           onAuthSuccess?.(data);
+           navigate('/');
         }
       } else {
         const { error: insertError } = await supabase
@@ -40,6 +42,8 @@ export default function Auth() {
         } else {
           setIsLogin(true);
           setError('');
+          setUsername('');
+          setPhone('');
           setPassword('');
         }
       }
